@@ -1,8 +1,9 @@
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
+import { getUploadBaseDir } from '@/lib/upload-dir'
 
-const UPLOAD_BASE = process.env.UPLOAD_DIR || path.join(process.cwd(), 'public', 'uploads')
+const UPLOAD_BASE = getUploadBaseDir()
 const MAX_SIZE = (Number(process.env.MAX_FILE_SIZE_MB) || 20) * 1024 * 1024
 
 const ALLOWED_TYPES = new Set([
