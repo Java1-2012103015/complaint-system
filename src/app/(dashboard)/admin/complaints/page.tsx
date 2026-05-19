@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { Header } from '@/components/layout/header'
 import { StatusBadge } from '@/components/complaints/status-badge'
 import { AdminComplaintsToolbar } from './toolbar'
+import { buildAdminComplaintWhere } from '@/lib/admin-complaint-where'
 import { AdminComplaintDeleteButton } from '@/components/admin/admin-complaint-delete-button'
 import { ClickableTableRow, IsolateRowClick } from '@/components/complaints/clickable-table-row'
 import { formatDate, formatDateTime } from '@/lib/utils'
@@ -29,17 +30,7 @@ export default async function AdminComplaintsPage({ searchParams }: PageProps) {
   const search = searchParams.search || ''
   const showPii = searchParams.showPii !== 'false'
 
-  const where: any = {}
-  if (status) where.status = status
-  if (search) {
-    where.OR = [
-      { title: { contains: search, mode: 'insensitive' } },
-      { receiptNumber: { contains: search, mode: 'insensitive' } },
-      { address: { contains: search, mode: 'insensitive' } },
-      { complainantName: { contains: search, mode: 'insensitive' } },
-      { complainantPhone: { contains: search, mode: 'insensitive' } },
-    ]
-  }
+  const where = buildAdminComplaintWhere({ status, search })
 
   const [items, total] = await Promise.all([
     prisma.complaint.findMany({

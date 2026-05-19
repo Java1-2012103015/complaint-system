@@ -10,7 +10,8 @@ import {
 import { PasteImportModal } from '@/components/complaints/paste-import-modal'
 import { STATUS_LABELS } from '@/types'
 import type { ComplaintStatus } from '@prisma/client'
-import { Search, Plus, ClipboardPaste, Eye, EyeOff, X } from 'lucide-react'
+import { Search, Plus, ClipboardPaste, Eye, EyeOff, X, Download, Loader2 } from 'lucide-react'
+import { toast } from '@/components/ui/use-toast'
 import Link from 'next/link'
 
 /** Radix Select는 value="" 를 허용하지 않음 — URL에서는 status 생략으로 "전체" 표현 */
@@ -27,6 +28,7 @@ export function AdminComplaintsToolbar({ total, showPii }: AdminComplaintsToolba
   const searchParams = useSearchParams()
   const [pasteOpen, setPasteOpen] = useState(false)
   const [search, setSearch] = useState(searchParams.get('search') || '')
+  const [exporting, setExporting] = useState(false)
   const [, startTransition] = useTransition()
 
   function push(updates: Record<string, string>) {
@@ -36,6 +38,40 @@ export function AdminComplaintsToolbar({ total, showPii }: AdminComplaintsToolba
     }
     p.set('page', '1')
     startTransition(() => router.push(`${pathname}?${p.toString()}`))
+  }
+
+  async function downloadCsv() {
+    setExporting(true)
+    try {
+      const q = new URLSearchParams(searchParams.toString())
+      q.delete('page')
+      const res = await fetch(`/api/admin/complaints/export?${q.toString()}`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || '다운로드 실패')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const disposition = res.headers.get('Content-Disposition')
+      const match = disposition?.match(/filename="?([^";]+)"?/)
+      a.download = match?.[1] ?? 'complaints.csv'
+      a.click()
+      URL.revokeObjectURL(url)
+      toast({
+        title: '다운로드 완료',
+        description: `현재 필터 기준 ${total.toLocaleString()}건을 CSV로 받았습니다.`,
+      })
+    } catch (e: unknown) {
+      toast({
+        variant: 'destructive',
+        title: '다운로드 실패',
+        description: e instanceof Error ? e.message : '처리 실패',
+      })
+    } finally {
+      setExporting(false)
+    }
   }
 
   return (
@@ -89,6 +125,18 @@ export function AdminComplaintsToolbar({ total, showPii }: AdminComplaintsToolba
         </Button>
 
         <div className="ml-auto flex gap-2">
+          <Button
+            variant="outline"
+            disabled={exporting || total === 0}
+            onClick={() => void downloadCsv()}
+          >
+            {exporting ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 mr-2" />
+            )}
+            CSV 다운로드
+          </Button>
           <Button variant="outline" onClick={() => setPasteOpen(true)}>
             <ClipboardPaste className="w-4 h-4 mr-2" />
             붙여넣기 등록
