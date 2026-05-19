@@ -30,5 +30,5 @@ export function getUploadSearchDirs(): string[] {
     path.join(cwd, 'public', 'uploads'),
     path.join(getProjectRoot(), '.next', 'standalone', 'public', 'uploads'),
   ]
-  return [...new Set(candidates.map((p) => path.resolve(p)))]
+  return Array.from(new Set(candidates.map((p) => path.resolve(p))))
 }
