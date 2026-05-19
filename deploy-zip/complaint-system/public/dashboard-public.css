@@ -1,0 +1,121 @@
+/**
+ * 공개 대시보드 보조 스타일 (/public 정적 파일)
+ * Next dev에서 app/layout.css 가 404 나는(깨진 .next 캐시) 경우에도
+ * 레이아웃·표가 읽을 수 있게 최소 UI를 보장합니다.
+ */
+#pub-dash-mount {
+  min-height: 100vh;
+  background: #f9fafb;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Noto Sans KR',
+    'Apple SD Gothic Neo',
+    sans-serif;
+  color: #111827;
+}
+
+#pub-dash-mount header {
+  color: #fff;
+  padding: 2.5rem 0;
+  background: linear-gradient(135deg, var(--sys-primary, #2563eb) 0%, var(--sys-accent, #7c3aed) 100%);
+}
+
+#pub-dash-mount header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+#pub-dash-mount header p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+#pub-dash-mount header a,
+#pub-dash-mount header button {
+  font-size: 0.875rem;
+  color: #fff;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 9999px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+#pub-dash-mount header a:hover,
+#pub-dash-mount header button:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+#pub-dash-mount header .max-w-5xl {
+  max-width: 64rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+#pub-dash-mount main {
+  max-width: 64rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 2rem 1.5rem;
+}
+
+#pub-dash-mount main h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+#pub-dash-mount main > div > p,
+#pub-dash-mount main .text-sm {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+#pub-dash-mount table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+#pub-dash-mount thead th {
+  background: #f9fafb;
+  color: #4b5563;
+  font-weight: 600;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+#pub-dash-mount tbody td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: top;
+}
+
+#pub-dash-mount tbody tr:last-child td {
+  border-bottom: none;
+}
+
+#pub-dash-mount tbody tr:hover {
+  background: #fafafa;
+}
+
+#pub-dash-mount .overflow-x-auto {
+  overflow-x: auto;
+}

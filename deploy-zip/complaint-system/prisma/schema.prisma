@@ -1,0 +1,243 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// 열거형
+// ─────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  DISTRIBUTOR_1
+  DISTRIBUTOR_2
+}
+
+enum ComplaintStatus {
+  PENDING            // 접수대기
+  AGENCY_ASSIGNED    // 기관배정 (1차 배분 완료)
+  OFFICER_ASSIGNED   // 담당자배정 (2차 배분 완료)
+  IN_PROGRESS_PLAN   // 처리중 - 계획수립중
+  IN_PROGRESS_SCHED  // 처리중 - 기간확정
+  WAITING_APPROVAL   // 승인대기 (2차가 결과 제출, 1차 승인 대기)
+  COMPLETED          // 처리완료
+  REJECTED           // 반려
+}
+
+enum NotificationType {
+  SMS
+  EMAIL
+}
+
+enum NotificationEvent {
+  ASSIGNED_D1         // 1차 배분
+  ASSIGNED_D2         // 2차 배분
+  REJECTED_TO_ADMIN   // 1차 → 관리자 반려
+  REJECTED_TO_D1      // 2차 → 1차 반려
+  APPROVAL_REQUESTED  // 2차 → 1차 승인 요청
+  APPROVED            // 1차 → 최종 승인 (처리완료)
+  REJECTED_TO_D2      // 1차 → 2차 반려
+  STATUS_CHANGED      // 상태 변경
+  ACCOUNT_CREATED     // 임시 계정 생성
+  COMPLETED           // 처리 완료
+}
+
+// ─────────────────────────────────────────────
+// 기관 (관리자 등록, 가입 시 검색 선택)
+// ─────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users              User[]
+  d1InviteComplaints Complaint[] @relation("ComplaintD1InviteOrg")
+
+  @@index([name])
+  @@map("organizations")
+}
+
+// ─────────────────────────────────────────────
+// 사용자
+// ─────────────────────────────────────────────
+
+model User {
+  id               String         @id @default(cuid())
+  loginId          String?        @unique
+  email            String         @unique
+  name             String
+  phone            String?
+  password         String
+  role             Role           @default(DISTRIBUTOR_2)
+  organizationId   String?
+  organization     Organization?  @relation(fields: [organizationId], references: [id])
+  department       String?
+  team             String?
+  isTemporary      Boolean        @default(false)
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  d1Complaints   Complaint[] @relation("D1Assignee")
+  d2Complaints   Complaint[] @relation("D2Assignee")
+  histories      ComplaintHistory[]
+  notifications  Notification[]
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// 자율보고
+// ─────────────────────────────────────────────
+
+model Complaint {
+  id               String          @id @default(cuid())
+  receiptNumber    String          @unique
+  title            String
+  content          String          @db.Text
+  category         String?
+  address          String?
+  /// 접수 시점의 발생일자(화면·CSV에서는 발생일자로 표기). 2차 처리 흐름에서 일정 확정 시 갱신될 수 있음.
+  scheduledDate    DateTime?
+
+  // 접수자 개인정보 (관리자 전용)
+  complainantName  String?
+  complainantPhone String?
+  complainantEmail String?
+  complainantAddr  String?
+
+  status           ComplaintStatus @default(PENDING)
+
+  d1Id             String?
+  d1               User?           @relation("D1Assignee", fields: [d1Id], references: [id])
+  /// 가입 전 1차 배정용 이메일(소문자·trim). 가입 시 동일 이메일·기관이면 d1Id로 연결됩니다.
+  d1InviteEmail            String?
+  d1InviteOrganizationId   String?
+  d1InviteOrganization     Organization? @relation("ComplaintD1InviteOrg", fields: [d1InviteOrganizationId], references: [id], onDelete: SetNull)
+  d2Id             String?
+  d2               User?           @relation("D2Assignee", fields: [d2Id], references: [id])
+  /// 가입 전 2차 배정용 이메일. 가입 시 동일 이메일·1차 기관과 일치하면 d2Id로 연결됩니다.
+  d2InviteEmail    String?
+
+  // 처리 계획 (D2 입력)
+  actionPlan       String?         @db.Text
+  plannedStartDate DateTime?
+  plannedEndDate   DateTime?
+
+  // 처리 결과 (D2 입력)
+  resultSummary    String?         @db.Text
+  completedAt      DateTime?
+
+  rawData          String?         @db.Text
+
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  files            ComplaintFile[]
+  histories        ComplaintHistory[]
+  notifications    Notification[]
+
+  @@index([status])
+  @@index([d1Id])
+  @@index([d2Id])
+  @@index([d1InviteEmail])
+  @@index([d2InviteEmail])
+  @@index([receiptNumber])
+  @@index([createdAt])
+  @@map("complaints")
+}
+
+// ─────────────────────────────────────────────
+// 첨부 파일
+// ─────────────────────────────────────────────
+
+model ComplaintFile {
+  id           String    @id @default(cuid())
+  complaintId  String
+  complaint    Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  originalName String
+  storedName   String
+  mimeType     String
+  size         Int
+  url          String
+  uploadedAt   DateTime  @default(now())
+
+  @@index([complaintId])
+  @@map("complaint_files")
+}
+
+// ─────────────────────────────────────────────
+// 처리 이력 (감사 로그)
+// ─────────────────────────────────────────────
+
+model ComplaintHistory {
+  id           String          @id @default(cuid())
+  complaintId  String
+  complaint    Complaint       @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  actorId      String?
+  actor        User?           @relation(fields: [actorId], references: [id])
+  fromStatus   ComplaintStatus?
+  toStatus     ComplaintStatus
+  comment      String?         @db.Text
+  // ASSIGN_D1 | ASSIGN_D2 | REJECT_TO_ADMIN | REJECT_TO_D1 | REJECT_TO_D2
+  // REQUEST_APPROVAL | APPROVE | STATUS_UPDATE | COMPLETE
+  actionType   String
+
+  createdAt    DateTime        @default(now())
+
+  @@index([complaintId])
+  @@map("complaint_histories")
+}
+
+// ─────────────────────────────────────────────
+// 알림 발송 로그
+// ─────────────────────────────────────────────
+
+model Notification {
+  id           String            @id @default(cuid())
+  complaintId  String?
+  complaint    Complaint?        @relation(fields: [complaintId], references: [id], onDelete: SetNull)
+  userId       String?
+  user         User?             @relation(fields: [userId], references: [id])
+  type         NotificationType
+  event        NotificationEvent
+  recipient    String
+  message      String            @db.Text
+  success      Boolean           @default(false)
+  errorMessage String?
+  sentAt       DateTime          @default(now())
+
+  @@index([complaintId])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────
+// 시스템 설정
+// ─────────────────────────────────────────────
+
+model SystemSettings {
+  id            String   @id @default("singleton")
+  siteName      String   @default("자율보고 처리 시스템")
+  logoText      String   @default("자율보고 처리")
+  primaryColor  String   @default("#2563eb")
+  accentColor   String   @default("#7c3aed")
+  adminEmail    String   @default("admin@example.com")
+  smsEnabled    Boolean  @default(false)
+  emailEnabled  Boolean  @default(false)
+  aligoApiKey   String?  @db.Text
+  aligoUserId   String?
+  aligoSender   String?
+  /// 상황별 SMS·이메일 본문 커스텀 (키: NotificationEvent 문자열, 값: {{siteName}}{{siteUrl}}{{siteUrlPhrase}}{{inviteSignupLine}}{{signupEmail}}{{receiptLine}}{{titleLine}}{{tempBlock}} 치환)
+  messageTemplates Json?
+  updatedAt     DateTime @updatedAt
+
+  @@map("system_settings")
+}
