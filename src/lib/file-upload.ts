@@ -3,7 +3,6 @@ import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { getUploadBaseDir } from '@/lib/upload-dir'
 
-const UPLOAD_BASE = getUploadBaseDir()
 const MAX_SIZE = (Number(process.env.MAX_FILE_SIZE_MB) || 20) * 1024 * 1024
 
 const ALLOWED_TYPES = new Set([
@@ -30,9 +29,10 @@ export async function saveUploadedFile(file: File): Promise<UploadResult> {
     throw new Error(`파일 크기가 초과되었습니다 (최대 ${process.env.MAX_FILE_SIZE_MB || 20}MB)`)
   }
 
+  const uploadBase = getUploadBaseDir()
   const today = new Date()
   const yearMonth = `${today.getFullYear()}/${String(today.getMonth() + 1).padStart(2, '0')}`
-  const dirPath = path.join(UPLOAD_BASE, yearMonth)
+  const dirPath = path.join(uploadBase, yearMonth)
 
   await mkdir(dirPath, { recursive: true })
 

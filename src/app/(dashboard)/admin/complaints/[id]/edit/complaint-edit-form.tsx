@@ -38,7 +38,8 @@ export function ComplaintEditForm({ complaint }: ComplaintEditFormProps) {
   const attachInputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [existingFiles] = useState<FileItem[]>(complaint.files)
+  const [existingFiles, setExistingFiles] = useState<FileItem[]>(complaint.files)
+  const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [form, setForm] = useState({
     title: complaint.title,
@@ -64,6 +65,26 @@ export function ComplaintEditForm({ complaint }: ComplaintEditFormProps) {
 
   function removePendingFile(idx: number) {
     setPendingFiles((p) => p.filter((_, i) => i !== idx))
+  }
+
+  async function deleteExistingFile(file: FileItem) {
+    if (!confirm(`「${file.originalName}」을(를) 삭제할까요?`)) return
+    setDeletingFileId(file.id)
+    try {
+      const res = await fetch(`/api/files/${file.id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || '삭제 실패')
+      setExistingFiles((prev) => prev.filter((f) => f.id !== file.id))
+      toast({ title: '첨부 파일 삭제됨', description: file.originalName })
+    } catch (err: unknown) {
+      toast({
+        variant: 'destructive',
+        title: '삭제 실패',
+        description: err instanceof Error ? err.message : '처리 실패',
+      })
+    } finally {
+      setDeletingFileId(null)
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -194,7 +215,12 @@ export function ComplaintEditForm({ complaint }: ComplaintEditFormProps) {
                   <p className="text-xs font-medium text-gray-600">기존 첨부 ({existingFiles.length})</p>
                   <div className="flex flex-wrap gap-2">
                     {existingFiles.map((f) => (
-                      <FilePreview key={f.id} file={f} />
+                      <FilePreview
+                        key={f.id}
+                        file={f}
+                        onDelete={() => void deleteExistingFile(f)}
+                        deleting={deletingFileId === f.id}
+                      />
                     ))}
                   </div>
                 </div>

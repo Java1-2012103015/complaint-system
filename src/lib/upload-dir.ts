@@ -1,12 +1,19 @@
 import path from 'path'
 
-/** Next.js standalone(PM2) 실행 시 프로젝트 루트 (/var/www/complaint-system) */
+/** 프로젝트 루트 (운영: .env 에 PROJECT_ROOT=/var/www/complaint-system 권장) */
 export function getProjectRoot(): string {
+  const fromEnv = process.env.PROJECT_ROOT?.trim()
+  if (fromEnv) return path.resolve(fromEnv)
+
   const cwd = process.cwd().replace(/\\/g, '/')
-  if (cwd.endsWith('/.next/standalone') || cwd.includes('/.next/standalone/')) {
+  if (cwd.includes('.next/standalone')) {
     return path.resolve(process.cwd(), '..', '..')
   }
   return process.cwd()
+}
+
+export function isStandaloneRuntime(): boolean {
+  return process.cwd().replace(/\\/g, '/').includes('.next/standalone')
 }
 
 /** 업로드 저장·조회 기준 경로 (기본: {프로젝트}/public/uploads) */
@@ -21,14 +28,16 @@ export function getUploadBaseDir(): string {
   return path.join(root, 'public', 'uploads')
 }
 
-/** standalone 등 예전에 저장된 파일까지 찾기 위한 후보 경로 */
+/** standalone·프로젝트 루트 등 실제 저장 위치를 순서대로 탐색 */
 export function getUploadSearchDirs(): string[] {
+  const root = getProjectRoot()
   const primary = getUploadBaseDir()
-  const cwd = process.cwd()
-  const candidates = [
-    primary,
-    path.join(cwd, 'public', 'uploads'),
-    path.join(getProjectRoot(), '.next', 'standalone', 'public', 'uploads'),
-  ]
+  const cwdLocal = path.join(process.cwd(), 'public', 'uploads')
+  const standaloneDir = path.join(root, '.next', 'standalone', 'public', 'uploads')
+
+  const candidates = isStandaloneRuntime()
+    ? [cwdLocal, primary, standaloneDir]
+    : [primary, cwdLocal, standaloneDir]
+
   return Array.from(new Set(candidates.map((p) => path.resolve(p))))
 }
