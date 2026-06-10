@@ -35,6 +35,7 @@ enum NotificationType {
 
 enum NotificationEvent {
   ASSIGNED_D1         // 1차 배분
+  ASSIGNED_D1_COMPLAINANT // 1차 배분 — 보고자(접수자) 안내
   ASSIGNED_D2         // 2차 배분
   REJECTED_TO_ADMIN   // 1차 → 관리자 반려
   REJECTED_TO_D1      // 2차 → 1차 반려

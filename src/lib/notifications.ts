@@ -91,6 +91,7 @@ export interface NotificationData {
   assignerEmail?: string
   assigneeEmail?: string
   assignerLabel?: string
+  organizationName?: string
 }
 
 async function resolveNotificationBody(
@@ -112,6 +113,7 @@ async function resolveNotificationBody(
     assignerEmail: data.assignerEmail,
     assigneeEmail: data.assigneeEmail,
     assignerLabel: data.assignerLabel ?? defaultAssignerLabel(event),
+    organizationName: data.organizationName,
   }
   const raw = settings?.messageTemplates as Record<string, string> | null | undefined
   const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
@@ -129,7 +131,7 @@ export async function buildNotificationMessage(
   return resolveNotificationBody(event, data)
 }
 
-type AssignNotifyEvent = 'ASSIGNED_D1' | 'ASSIGNED_D2'
+type AssignNotifyEvent = 'ASSIGNED_D1' | 'ASSIGNED_D2' | 'ASSIGNED_D1_COMPLAINANT'
 
 /** 배정 직후 관리자가 명시적으로 보내는 메일 1통 */
 export async function sendAssignmentEmailOnly(params: {

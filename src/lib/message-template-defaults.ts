@@ -22,6 +22,8 @@ export interface MessageTemplateData {
   assigneeEmail?: string
   /** 배정 알림: 배정 실행자 역할 표기 (예: 1차 배정자, 1차 담당자) */
   assignerLabel?: string
+  /** 1차 배정 보고자 안내: 배정된 기관명 */
+  organizationName?: string
 }
 
 export function defaultAssignerLabel(event: NotificationEvent): string {
@@ -52,6 +54,8 @@ export const MESSAGE_TEMPLATE_VARIABLES: MessageTemplateVariable[] = [
   { key: 'assigneeEmail', label: '수신자 이메일', description: '배정 받은 담당자 이메일', example: 'assignee@naver.com' },
   { key: 'signupEmail', label: '초대 이메일', description: '가입 대기 배정 시 초대 주소', example: 'invite@naver.com' },
   { key: 'inviteSignupLine', label: '가입 안내 문단', description: '미가입 배정 시에만 자동 삽입', example: '기존 사용자가 아닐 경우…' },
+  { key: 'receiptNumber', label: '접수번호(일련번호)', description: '자율보고 접수번호', example: '2026-00001' },
+  { key: 'organizationName', label: '배정 기관명', description: '1차 배정된 기관 이름', example: 'OO공사' },
   { key: 'receiptLine', label: '접수번호 줄', description: '접수번호가 있을 때 줄바꿈+번호', example: '\\n접수번호: 2026-00001' },
   { key: 'titleLine', label: '제목 줄', description: '자율보고 제목이 있을 때', example: '\\n제목: 예시' },
   { key: 'tempBlock', label: '임시 비밀번호', description: '신규 계정 생성 시에만', example: '\\n임시 비밀번호: …' },
@@ -111,6 +115,8 @@ export function isMessageTemplateVariableCustomized(
 export const DEFAULT_MESSAGE_TEMPLATES: Record<NotificationEvent, string> = {
   ASSIGNED_D1:
     '{{siteName}} {{assignerLabel}}({{assignerEmail}})가 귀하({{assigneeEmail}})에게 철도안전 자율보고를 배정했습니다.{{siteUrlConfirmPhrase}}{{inviteSignupLine}}{{receiptLine}}{{titleLine}}{{tempBlock}}',
+  ASSIGNED_D1_COMPLAINANT:
+    '귀하의 {{receiptNumber}} 자율보고가 {{organizationName}}에 배정되었습니다.',
   ASSIGNED_D2:
     '{{siteName}} {{assignerLabel}}({{assignerEmail}})가 귀하({{assigneeEmail}})에게 철도안전 자율보고를 배정했습니다.{{siteUrlConfirmPhrase}}{{inviteSignupLine}}{{receiptLine}}{{titleLine}}{{tempBlock}}',
   REJECTED_TO_ADMIN: '[{{siteName}}] 자율보고가 관리자에게 반려되었습니다.{{receiptLine}}{{titleLine}}',
@@ -125,6 +131,7 @@ export const DEFAULT_MESSAGE_TEMPLATES: Record<NotificationEvent, string> = {
 
 export const MESSAGE_SCENARIO_LABELS: Record<NotificationEvent, string> = {
   ASSIGNED_D1: '담당자 배정 확인 문자(관리자→1차)',
+  ASSIGNED_D1_COMPLAINANT: '배정 안내 문자(관리자→보고자)',
   ASSIGNED_D2: '담당자 배정 확인 문자(1차→2차)',
   REJECTED_TO_ADMIN: '반송 문자(1차→관리자)',
   REJECTED_TO_D1: '반송 문자(2차→1차)',
@@ -138,6 +145,7 @@ export const MESSAGE_SCENARIO_LABELS: Record<NotificationEvent, string> = {
 
 export const EDITABLE_NOTIFICATION_EVENTS: NotificationEvent[] = [
   'ASSIGNED_D1',
+  'ASSIGNED_D1_COMPLAINANT',
   'ASSIGNED_D2',
   'REJECTED_TO_ADMIN',
   'REJECTED_TO_D1',
@@ -165,7 +173,9 @@ export function hydrateMessageTemplate(
   const inviteSignupLine = signup
     ? `\n기존 사용자가 아닐 경우, 이메일로 사용등록 진행 후 자율보고 확인 가능합니다. ${signup}`
     : ''
-  const receiptLine = data.receiptNumber ? `\n접수번호: ${data.receiptNumber}` : ''
+  const receiptNumber = (data.receiptNumber ?? '').trim()
+  const organizationName = (data.organizationName ?? '').trim()
+  const receiptLine = receiptNumber ? `\n접수번호: ${receiptNumber}` : ''
   const titleLine = data.title ? `\n제목: ${data.title}` : ''
   const tempBlock = data.tempPassword
     ? `\n임시 비밀번호: ${data.tempPassword}\n로그인 후 변경해 주세요.`
@@ -180,6 +190,8 @@ export function hydrateMessageTemplate(
     .replace(/\{\{assignerLabel\}\}/g, assignerLabel)
     .replace(/\{\{signupEmail\}\}/g, signup)
     .replace(/\{\{inviteSignupLine\}\}/g, inviteSignupLine)
+    .replace(/\{\{receiptNumber\}\}/g, receiptNumber)
+    .replace(/\{\{organizationName\}\}/g, organizationName)
     .replace(/\{\{receiptLine\}\}/g, receiptLine)
     .replace(/\{\{titleLine\}\}/g, titleLine)
     .replace(/\{\{tempBlock\}\}/g, tempBlock)

@@ -42,6 +42,12 @@ interface NotifyMeta {
   inviteOnly?: boolean
 }
 
+interface ComplainantNotifyMeta {
+  event: 'ASSIGNED_D1_COMPLAINANT'
+  messagePreview: string
+  complainantPhone: string | null
+}
+
 interface AssignModalProps {
   open: boolean
   onClose: () => void
@@ -57,6 +63,8 @@ type FlowView =
   | 'notify_email'
   | 'notify_sms'
   | 'notify_sms_preview'
+  | 'notify_complainant_sms'
+  | 'notify_complainant_sms_preview'
 
 export function AssignModal({ open, onClose, complaintId, level, d2OrganizationId }: AssignModalProps) {
   const router = useRouter()
@@ -73,9 +81,12 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
 
   const [flowView, setFlowView] = useState<FlowView>('form')
   const [notifyMeta, setNotifyMeta] = useState<NotifyMeta | null>(null)
+  const [complainantNotifyMeta, setComplainantNotifyMeta] = useState<ComplainantNotifyMeta | null>(null)
   const [pendingTempPassword, setPendingTempPassword] = useState('')
   const [smsPhone, setSmsPhone] = useState('')
+  const [complainantSmsPhone, setComplainantSmsPhone] = useState('')
   const [notifyDraft, setNotifyDraft] = useState('')
+  const [complainantNotifyDraft, setComplainantNotifyDraft] = useState('')
   const [notifyLoading, setNotifyLoading] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
   const didAssignRef = useRef(false)
@@ -136,9 +147,12 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
     if (!open) {
       setFlowView('form')
       setNotifyMeta(null)
+      setComplainantNotifyMeta(null)
       setPendingTempPassword('')
       setSmsPhone('')
+      setComplainantSmsPhone('')
       setNotifyDraft('')
+      setComplainantNotifyDraft('')
       setTempPassword('')
       setCreatedLoginId('')
       setError('')
@@ -156,9 +170,12 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
     didAssignRef.current = false
     setFlowView('form')
     setNotifyMeta(null)
+    setComplainantNotifyMeta(null)
     setPendingTempPassword('')
     setSmsPhone('')
+    setComplainantSmsPhone('')
     setNotifyDraft('')
+    setComplainantNotifyDraft('')
     setTempPassword('')
     setCreatedLoginId('')
     setSelectedUserId('')
@@ -171,13 +188,28 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
     onClose()
   }
 
-  function startNotifyFlow(meta: NotifyMeta, tempPwd: string) {
+  function startNotifyFlow(meta: NotifyMeta, tempPwd: string, complainantMeta?: ComplainantNotifyMeta) {
     setNotifyMeta(meta)
+    setComplainantNotifyMeta(complainantMeta ?? null)
     setPendingTempPassword(tempPwd)
     setNotifyDraft(meta.messagePreview)
     const raw = meta.assigneePhone?.replace(/\D/g, '') ?? ''
     setSmsPhone(raw)
+    if (complainantMeta) {
+      setComplainantNotifyDraft(complainantMeta.messagePreview)
+      setComplainantSmsPhone(complainantMeta.complainantPhone?.replace(/\D/g, '') ?? '')
+    }
     setFlowView('notify_email')
+  }
+
+  function goToComplainantOrClose() {
+    if (level === 1 && complainantNotifyMeta) {
+      setComplainantNotifyDraft(complainantNotifyMeta.messagePreview)
+      setComplainantSmsPhone(complainantNotifyMeta.complainantPhone?.replace(/\D/g, '') ?? '')
+      setFlowView('notify_complainant_sms')
+      return
+    }
+    resetAndClose()
   }
 
   async function fetchNotifyPreview(kind: 'email' | 'sms') {
@@ -206,6 +238,72 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
       })
     } finally {
       setPreviewLoading(false)
+    }
+  }
+
+  async function fetchComplainantPreview() {
+    setPreviewLoading(true)
+    try {
+      const res = await fetch(`/api/complaints/${complaintId}/assignment-notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'sms',
+          level: 1,
+          recipient: 'complainant',
+          previewOnly: true,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || '미리보기 실패')
+      if (typeof data.messagePreview === 'string') {
+        setComplainantNotifyDraft(data.messagePreview)
+      }
+    } catch (e: unknown) {
+      toast({
+        variant: 'destructive',
+        title: '미리보기 실패',
+        description: e instanceof Error ? e.message : '알 수 없는 오류',
+      })
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  async function postComplainantNotify(phone?: string, message?: string) {
+    const bodyMessage = (message ?? complainantNotifyDraft).trim()
+    if (!bodyMessage) {
+      toast({ variant: 'destructive', title: '발송 실패', description: '메시지 내용을 입력해 주세요.' })
+      return false
+    }
+    setNotifyLoading(true)
+    try {
+      const res = await fetch(`/api/complaints/${complaintId}/assignment-notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'sms',
+          level: 1,
+          recipient: 'complainant',
+          phone,
+          message: bodyMessage,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || '발송 실패')
+      if (data.success === false) {
+        throw new Error(data.error || '발송 실패')
+      }
+      return true
+    } catch (e: unknown) {
+      toast({
+        variant: 'destructive',
+        title: '문자 발송 실패',
+        description: e instanceof Error ? e.message : '알 수 없는 오류',
+      })
+      return false
+    } finally {
+      setNotifyLoading(false)
     }
   }
 
@@ -266,6 +364,7 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
       if (!res.ok) throw new Error(data.error || '배분 실패')
 
       const meta = data.notifyMeta as NotifyMeta | undefined
+      const complainantMeta = data.complainantNotifyMeta as ComplainantNotifyMeta | undefined
       const tp = typeof data.tempPassword === 'string' ? data.tempPassword : ''
 
       if (data.tempPassword) {
@@ -274,15 +373,20 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
         setCreatedLoginId(data.loginId || '')
         if (meta) {
           setNotifyMeta(meta)
+          setComplainantNotifyMeta(complainantMeta ?? null)
           setNotifyDraft(meta.messagePreview)
           setPendingTempPassword(tp)
           const raw = meta.assigneePhone?.replace(/\D/g, '') ?? ''
           setSmsPhone(raw)
+          if (complainantMeta) {
+            setComplainantNotifyDraft(complainantMeta.messagePreview)
+            setComplainantSmsPhone(complainantMeta.complainantPhone?.replace(/\D/g, '') ?? '')
+          }
         }
         setFlowView('temp_password')
       } else if (meta) {
         didAssignRef.current = true
-        startNotifyFlow(meta, tp)
+        startNotifyFlow(meta, tp, complainantMeta)
       } else {
         didAssignRef.current = true
         resetAndClose()
@@ -312,9 +416,10 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
       if (!res.ok) throw new Error(data.error || '배분 실패')
 
       const meta = data.notifyMeta as NotifyMeta | undefined
+      const complainantMeta = data.complainantNotifyMeta as ComplainantNotifyMeta | undefined
       if (meta) {
         didAssignRef.current = true
-        startNotifyFlow(meta, '')
+        startNotifyFlow(meta, '', complainantMeta)
       } else {
         didAssignRef.current = true
         resetAndClose()
@@ -464,7 +569,7 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
             </p>
           </div>
           <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" disabled={notifyLoading} onClick={() => resetAndClose()}>
+            <Button type="button" variant="outline" disabled={notifyLoading} onClick={() => goToComplainantOrClose()}>
               건너뛰기
             </Button>
             <Button
@@ -539,6 +644,120 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
                 const ok = await postNotify('sms', smsPhone)
                 if (ok) {
                   toast({ title: '문자 발송', description: '입력하신 번호로 알림 문자를 보냈습니다.' })
+                  goToComplainantOrClose()
+                }
+              }}
+            >
+              {notifyLoading && <Loader2 className="mr-2 w-4 h-4 animate-spin" />}
+              발송
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  if (flowView === 'notify_complainant_sms' && complainantNotifyMeta) {
+    return (
+      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>보고자 문자(알림톡) 발송</DialogTitle>
+            <DialogDescription>
+              접수자(보고자)에게 배정 안내 문자를 보낼 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="assign-complainant-sms-phone">수신 휴대폰</Label>
+            <Input
+              id="assign-complainant-sms-phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="01012345678"
+              value={complainantSmsPhone}
+              onChange={(e) => setComplainantSmsPhone(e.target.value)}
+            />
+            <p className="text-xs text-gray-500 leading-relaxed">
+              접수 시 등록된 연락처가 있으면 자동으로 채워집니다. 입력된 번호는 저장되지 않습니다.
+            </p>
+          </div>
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" variant="outline" disabled={notifyLoading} onClick={() => resetAndClose()}>
+              건너뛰기
+            </Button>
+            <Button
+              type="button"
+              disabled={notifyLoading || previewLoading || complainantSmsPhone.replace(/\D/g, '').length < 10}
+              onClick={async () => {
+                const d = complainantSmsPhone.replace(/\D/g, '')
+                if (d.length < 10) return
+                await fetchComplainantPreview()
+                setFlowView('notify_complainant_sms_preview')
+              }}
+            >
+              {previewLoading && <Loader2 className="mr-2 w-4 h-4 animate-spin" />}
+              미리보기
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  if (flowView === 'notify_complainant_sms_preview' && complainantNotifyMeta) {
+    return (
+      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>보고자 문자 발송 미리보기</DialogTitle>
+            <DialogDescription>
+              수신: <span className="font-medium text-gray-900">{complainantSmsPhone}</span> — 내용을 수정한 뒤 발송하세요.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="notify-complainant-sms-draft">발송 내용</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                disabled={previewLoading}
+                onClick={() => void fetchComplainantPreview()}
+              >
+                {previewLoading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                템플릿 다시 불러오기
+              </Button>
+            </div>
+            <Textarea
+              id="notify-complainant-sms-draft"
+              rows={6}
+              value={complainantNotifyDraft}
+              onChange={(e) => setComplainantNotifyDraft(e.target.value)}
+              className="text-sm leading-relaxed font-mono"
+              placeholder="발송할 문자 내용"
+            />
+            <p className="text-xs text-gray-500">
+              {complainantNotifyDraft.length}자 (90자 초과 시 LMS로 발송될 수 있습니다)
+            </p>
+          </div>
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={notifyLoading}
+              onClick={() => setFlowView('notify_complainant_sms')}
+            >
+              취소
+            </Button>
+            <Button
+              type="button"
+              disabled={notifyLoading || !complainantNotifyDraft.trim()}
+              onClick={async () => {
+                const ok = await postComplainantNotify(complainantSmsPhone)
+                if (ok) {
+                  toast({ title: '문자 발송', description: '보고자에게 배정 안내 문자를 보냈습니다.' })
                   resetAndClose()
                 }
               }}

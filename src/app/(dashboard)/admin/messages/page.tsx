@@ -6,6 +6,7 @@ import { formatDateTime } from '@/lib/utils'
 
 const EVENT_LABEL: Record<string, string> = {
   ASSIGNED_D1: '1차 배분',
+  ASSIGNED_D1_COMPLAINANT: '1차 배분(보고자)',
   ASSIGNED_D2: '2차 배분',
   REJECTED_TO_ADMIN: '관리자 반려',
   REJECTED_TO_D1: '1차 반려',

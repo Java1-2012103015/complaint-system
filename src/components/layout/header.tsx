@@ -1,8 +1,10 @@
 'use client'
 
 import { useSession } from 'next-auth/react'
-import { Bell, AlertTriangle } from 'lucide-react'
+import { AlertTriangle, LogOut } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { signOutAndHardNavigate } from '@/lib/sign-out-client'
 import { ROLE_LABELS } from '@/types'
 
 interface HeaderProps {
@@ -26,6 +28,16 @@ export function Header({ title }: HeaderProps) {
           {session?.user.role ? ROLE_LABELS[session.user.role] : ''}
         </Badge>
         <span className="text-sm text-gray-600">{session?.user.name}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => void signOutAndHardNavigate('/login')}
+          className="text-gray-600 hover:text-red-600 hover:bg-red-50"
+        >
+          <LogOut className="w-4 h-4" />
+          로그아웃
+        </Button>
       </div>
     </header>
   )

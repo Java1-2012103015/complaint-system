@@ -11,6 +11,7 @@ import {
 import type { NotificationEvent } from '@prisma/client'
 
 type Kind = 'email' | 'sms'
+type Recipient = 'assignee' | 'complainant'
 
 async function buildAssignmentNotifyContext(
   params: { id: string },
@@ -86,8 +87,49 @@ async function buildAssignmentNotifyContext(
   }
 }
 
+async function buildComplainantNotifyContext(
+  params: { id: string },
+  session: { user: { id: string; role: string } },
+) {
+  if (session.user.role !== 'ADMIN') {
+    return { error: 'Forbidden', status: 403 as const }
+  }
+
+  const complaint = await prisma.complaint.findUnique({
+    where: { id: params.id },
+    select: {
+      id: true,
+      receiptNumber: true,
+      title: true,
+      d1Id: true,
+      d1InviteOrganizationId: true,
+      d1: { select: { organization: { select: { name: true } } } },
+      d1InviteOrganization: { select: { name: true } },
+    },
+  })
+  if (!complaint) return { error: '자율보고를 찾을 수 없습니다.', status: 404 as const }
+  if (!complaint.d1Id && !complaint.d1InviteOrganizationId) {
+    return { error: '1차 배정이 완료되지 않았습니다.', status: 400 as const }
+  }
+
+  const organizationName =
+    complaint.d1?.organization?.name ?? complaint.d1InviteOrganization?.name ?? ''
+  if (!organizationName) {
+    return { error: '배정 기관 정보를 찾을 수 없습니다.', status: 400 as const }
+  }
+
+  const event = 'ASSIGNED_D1_COMPLAINANT' as const
+  const data: NotificationData = {
+    receiptNumber: complaint.receiptNumber,
+    title: complaint.title,
+    organizationName,
+  }
+
+  return { complaint, event, data }
+}
+
 // POST /api/complaints/[id]/assignment-notify
-// body: { kind, level, phone?, tempPassword?, message?, previewOnly?: boolean }
+// body: { kind, level, recipient?, phone?, tempPassword?, message?, previewOnly?: boolean }
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -95,6 +137,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const body = await req.json().catch(() => ({}))
   const kind = body.kind as Kind
   const level = Number(body.level) as 1 | 2
+  const recipient = (body.recipient === 'complainant' ? 'complainant' : 'assignee') as Recipient
   const phone = typeof body.phone === 'string' ? body.phone.trim() : ''
   const tempPassword = typeof body.tempPassword === 'string' ? body.tempPassword : undefined
   const previewOnly = body.previewOnly === true
@@ -103,8 +146,60 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (kind !== 'email' && kind !== 'sms') {
     return NextResponse.json({ error: 'kind은 email 또는 sms 여야 합니다.' }, { status: 400 })
   }
-  if (level !== 1 && level !== 2) {
+  if (recipient === 'assignee' && level !== 1 && level !== 2) {
     return NextResponse.json({ error: 'level은 1 또는 2 여야 합니다.' }, { status: 400 })
+  }
+  if (recipient === 'complainant') {
+    if (level !== 1) {
+      return NextResponse.json({ error: '보고자 알림은 1차 배정 시에만 가능합니다.' }, { status: 400 })
+    }
+    if (kind === 'email') {
+      return NextResponse.json({ error: '보고자 알림은 문자(SMS)만 지원합니다.' }, { status: 400 })
+    }
+
+    const ctx = await buildComplainantNotifyContext(params, session)
+    if ('error' in ctx) {
+      return NextResponse.json({ error: ctx.error }, { status: ctx.status })
+    }
+
+    const { event, data } = ctx
+    const messagePreview = await buildNotificationMessage(event, data)
+
+    if (previewOnly) {
+      return NextResponse.json({ success: true, messagePreview })
+    }
+
+    const finalMessage = customMessage || messagePreview
+    if (!finalMessage.trim()) {
+      return NextResponse.json({ error: '발송할 메시지 내용이 비어 있습니다.' }, { status: 400 })
+    }
+
+    const digits = phone.replace(/\D/g, '')
+    if (digits.length < 10 || digits.length > 12) {
+      return NextResponse.json({ error: '유효한 휴대폰 번호를 입력해 주세요.' }, { status: 400 })
+    }
+
+    const { success } = await sendAssignmentSmsOnly({
+      complaintId: params.id,
+      userId: null,
+      event,
+      data,
+      phone: digits,
+      messageOverride: finalMessage,
+    })
+
+    const aligoCfg = await getAligoSendConfig()
+    if (!success && !aligoCfg) {
+      return NextResponse.json({
+        success: false,
+        messagePreview,
+        error: '문자(알리고) API가 설정되어 있지 않습니다. 시스템 설정 또는 환경변수를 확인하세요.',
+      })
+    }
+    if (!success) {
+      return NextResponse.json({ success: false, messagePreview, error: '문자 발송에 실패했습니다.' })
+    }
+    return NextResponse.json({ success: true, messagePreview: finalMessage })
   }
 
   const ctx = await buildAssignmentNotifyContext(params, session, level, tempPassword)

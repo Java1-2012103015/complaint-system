@@ -6,6 +6,22 @@ import { generateTempPassword, hashPassword, isValidInviteEmail, normalizeInvite
 import { allocateUniqueLoginIdFromEmail } from '@/lib/login-id'
 import type { Role } from '@prisma/client'
 
+async function buildComplainantNotifyMeta(
+  complaint: { receiptNumber: string; complainantPhone: string | null },
+  organizationName: string,
+) {
+  const data = {
+    receiptNumber: complaint.receiptNumber,
+    organizationName,
+  }
+  const messagePreview = await buildNotificationMessage('ASSIGNED_D1_COMPLAINANT', data)
+  return {
+    event: 'ASSIGNED_D1_COMPLAINANT' as const,
+    messagePreview,
+    complainantPhone: complaint.complainantPhone,
+  }
+}
+
 // POST /api/complaints/[id]/assign
 // body: { level, userId?, organizationId?, newUser?, inviteEmail? }
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
@@ -72,6 +88,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let updateData: Record<string, unknown>
     let historyToStatus: typeof complaint.status
     let historyComment: string
+    let inviteOrgName = ''
 
     if (level === 1) {
       const bodyOrg = typeof body.organizationId === 'string' ? body.organizationId.trim() : ''
@@ -80,6 +97,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }
       const org = await prisma.organization.findFirst({ where: { id: bodyOrg, isActive: true } })
       if (!org) return NextResponse.json({ error: '유효한 기관을 선택하세요.' }, { status: 400 })
+      inviteOrgName = org.name
 
       const hasD1Slot = !!(complaint.d1Id || complaint.d1InviteEmail)
       historyComment = `가입대기 1차배정(${org.name} · ${inviteEmailNorm})`
@@ -141,6 +159,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
     const messagePreview = await buildNotificationMessage(event, notifyData)
 
+    const complainantNotifyMeta =
+      level === 1 ? await buildComplainantNotifyMeta(complaint, inviteOrgName) : undefined
+
     return NextResponse.json({
       success: true,
       complaint: updated,
@@ -152,6 +173,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         assigneePhone: null,
         inviteOnly: true,
       },
+      complainantNotifyMeta,
     })
   }
 
@@ -319,6 +341,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
   const messagePreview = await buildNotificationMessage(event, notifyData)
 
+  const complainantNotifyMeta =
+    level === 1 ? await buildComplainantNotifyMeta(complaint, orgName) : undefined
+
   return NextResponse.json({
     success: true,
     complaint: updated,
@@ -332,5 +357,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       assigneePhone: assignee?.phone ?? null,
       assigneeId,
     },
+    complainantNotifyMeta,
   })
 }
