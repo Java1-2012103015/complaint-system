@@ -101,6 +101,7 @@ async function buildComplainantNotifyContext(
       id: true,
       receiptNumber: true,
       title: true,
+      complainantPhone: true,
       d1Id: true,
       d1InviteOrganizationId: true,
       d1: { select: { organization: { select: { name: true } } } },
@@ -166,7 +167,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const messagePreview = await buildNotificationMessage(event, data)
 
     if (previewOnly) {
-      return NextResponse.json({ success: true, messagePreview })
+      return NextResponse.json({
+        success: true,
+        messagePreview,
+        complainantPhone: ctx.complaint.complainantPhone,
+      })
     }
 
     const finalMessage = customMessage || messagePreview

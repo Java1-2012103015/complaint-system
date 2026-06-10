@@ -62,9 +62,7 @@ type FlowView =
   | 'temp_password'
   | 'notify_email'
   | 'notify_sms'
-  | 'notify_sms_preview'
   | 'notify_complainant_sms'
-  | 'notify_complainant_sms_preview'
 
 export function AssignModal({ open, onClose, complaintId, level, d2OrganizationId }: AssignModalProps) {
   const router = useRouter()
@@ -90,10 +88,50 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
   const [notifyLoading, setNotifyLoading] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
   const didAssignRef = useRef(false)
+  const complainantNotifyMetaRef = useRef<ComplainantNotifyMeta | null>(null)
+  const assigneeSmsTemplateLoadedRef = useRef(false)
+  const complainantSmsTemplateLoadedRef = useRef(false)
 
   useEffect(() => {
-    if (open) didAssignRef.current = false
+    if (open) {
+      didAssignRef.current = false
+      complainantNotifyMetaRef.current = null
+      assigneeSmsTemplateLoadedRef.current = false
+      complainantSmsTemplateLoadedRef.current = false
+    }
   }, [open])
+
+  useEffect(() => {
+    if (!open || flowView !== 'notify_sms' || !notifyMeta) {
+      if (flowView !== 'notify_sms') assigneeSmsTemplateLoadedRef.current = false
+      return
+    }
+    if (!assigneeSmsTemplateLoadedRef.current) {
+      assigneeSmsTemplateLoadedRef.current = true
+      void fetchNotifyPreview('sms')
+    }
+  }, [open, flowView, notifyMeta])
+
+  useEffect(() => {
+    if (!open || flowView !== 'notify_complainant_sms') {
+      if (flowView !== 'notify_complainant_sms') complainantSmsTemplateLoadedRef.current = false
+      return
+    }
+    if (!complainantSmsTemplateLoadedRef.current) {
+      complainantSmsTemplateLoadedRef.current = true
+      void fetchComplainantPreview()
+    }
+  }, [open, flowView])
+
+  function rememberComplainantMeta(meta?: ComplainantNotifyMeta | null) {
+    const value = meta ?? null
+    complainantNotifyMetaRef.current = value
+    setComplainantNotifyMeta(value)
+    if (value) {
+      setComplainantNotifyDraft(value.messagePreview)
+      setComplainantSmsPhone(value.complainantPhone?.replace(/\D/g, '') ?? '')
+    }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -147,6 +185,7 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
     if (!open) {
       setFlowView('form')
       setNotifyMeta(null)
+      complainantNotifyMetaRef.current = null
       setComplainantNotifyMeta(null)
       setPendingTempPassword('')
       setSmsPhone('')
@@ -170,6 +209,7 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
     didAssignRef.current = false
     setFlowView('form')
     setNotifyMeta(null)
+    complainantNotifyMetaRef.current = null
     setComplainantNotifyMeta(null)
     setPendingTempPassword('')
     setSmsPhone('')
@@ -190,22 +230,50 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
 
   function startNotifyFlow(meta: NotifyMeta, tempPwd: string, complainantMeta?: ComplainantNotifyMeta) {
     setNotifyMeta(meta)
-    setComplainantNotifyMeta(complainantMeta ?? null)
+    rememberComplainantMeta(complainantMeta)
     setPendingTempPassword(tempPwd)
     setNotifyDraft(meta.messagePreview)
     const raw = meta.assigneePhone?.replace(/\D/g, '') ?? ''
     setSmsPhone(raw)
-    if (complainantMeta) {
-      setComplainantNotifyDraft(complainantMeta.messagePreview)
-      setComplainantSmsPhone(complainantMeta.complainantPhone?.replace(/\D/g, '') ?? '')
-    }
     setFlowView('notify_email')
   }
 
-  function goToComplainantOrClose() {
-    if (level === 1 && complainantNotifyMeta) {
-      setComplainantNotifyDraft(complainantNotifyMeta.messagePreview)
-      setComplainantSmsPhone(complainantNotifyMeta.complainantPhone?.replace(/\D/g, '') ?? '')
+  async function goToComplainantOrClose() {
+    if (level !== 1) {
+      resetAndClose()
+      return
+    }
+
+    let meta = complainantNotifyMetaRef.current ?? complainantNotifyMeta
+    if (!meta) {
+      try {
+        const res = await fetch(`/api/complaints/${complaintId}/assignment-notify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'sms',
+            level: 1,
+            recipient: 'complainant',
+            previewOnly: true,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.ok && typeof data.messagePreview === 'string') {
+          meta = {
+            event: 'ASSIGNED_D1_COMPLAINANT',
+            messagePreview: data.messagePreview,
+            complainantPhone: typeof data.complainantPhone === 'string' ? data.complainantPhone : null,
+          }
+          rememberComplainantMeta(meta)
+        }
+      } catch {
+        // 미리보기 실패 시 닫기
+      }
+    }
+
+    if (meta) {
+      setComplainantNotifyDraft(meta.messagePreview)
+      setComplainantSmsPhone(meta.complainantPhone?.replace(/\D/g, '') ?? '')
       setFlowView('notify_complainant_sms')
       return
     }
@@ -258,6 +326,12 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
       if (!res.ok) throw new Error(data.error || '미리보기 실패')
       if (typeof data.messagePreview === 'string') {
         setComplainantNotifyDraft(data.messagePreview)
+      }
+      if (typeof data.complainantPhone === 'string' && data.complainantPhone.trim()) {
+        setComplainantSmsPhone((prev) => {
+          if (prev.replace(/\D/g, '').length >= 10) return prev
+          return data.complainantPhone.replace(/\D/g, '')
+        })
       }
     } catch (e: unknown) {
       toast({
@@ -373,15 +447,11 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
         setCreatedLoginId(data.loginId || '')
         if (meta) {
           setNotifyMeta(meta)
-          setComplainantNotifyMeta(complainantMeta ?? null)
+          rememberComplainantMeta(complainantMeta)
           setNotifyDraft(meta.messagePreview)
           setPendingTempPassword(tp)
           const raw = meta.assigneePhone?.replace(/\D/g, '') ?? ''
           setSmsPhone(raw)
-          if (complainantMeta) {
-            setComplainantNotifyDraft(complainantMeta.messagePreview)
-            setComplainantSmsPhone(complainantMeta.complainantPhone?.replace(/\D/g, '') ?? '')
-          }
         }
         setFlowView('temp_password')
       } else if (meta) {
@@ -450,7 +520,7 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
               <p>임시 비밀번호: <strong className="text-blue-600">{tempPassword}</strong></p>
             </div>
             <p className="text-xs text-gray-500">
-              다음 단계에서 메일·문자(알림톡) 발송 여부를 선택할 수 있습니다.
+              다음 단계에서 1차 담당자 메일·문자(1/3·2/3), 이어서 보고자 안내 문자(3/3) 발송을 선택할 수 있습니다.
             </p>
           </div>
           <DialogFooter>
@@ -478,8 +548,10 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>메일 발송</DialogTitle>
-            <DialogDescription>내용을 확인·수정한 뒤 발송하세요.</DialogDescription>
+            <DialogTitle>1차 담당자 메일 발송 (1/3)</DialogTitle>
+            <DialogDescription>
+              내용을 확인·수정한 뒤 발송하세요. 이후 담당자 문자(2/3), 보고자 문자(3/3) 단계가 이어집니다.
+            </DialogDescription>
           </DialogHeader>
           {hasEmail ? (
             <p className="text-sm text-gray-600">
@@ -548,103 +620,74 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
   if (flowView === 'notify_sms' && notifyMeta) {
     return (
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>문자(알림톡) 발송</DialogTitle>
-            <DialogDescription>알림톡(문자)도 송부하시겠습니까?</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="assign-sms-phone">수신 휴대폰</Label>
-            <Input
-              id="assign-sms-phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="01012345678"
-              value={smsPhone}
-              onChange={(e) => setSmsPhone(e.target.value)}
-            />
-            <p className="text-xs text-gray-500 leading-relaxed">
-              입력된 핸드폰 번호는 저장되지 않습니다.
-            </p>
-          </div>
-          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" disabled={notifyLoading} onClick={() => goToComplainantOrClose()}>
-              건너뛰기
-            </Button>
-            <Button
-              type="button"
-              disabled={notifyLoading || previewLoading || smsPhone.replace(/\D/g, '').length < 10}
-              onClick={async () => {
-                const d = smsPhone.replace(/\D/g, '')
-                if (d.length < 10) return
-                await fetchNotifyPreview('sms')
-                setFlowView('notify_sms_preview')
-              }}
-            >
-              {previewLoading && <Loader2 className="mr-2 w-4 h-4 animate-spin" />}
-              미리보기
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    )
-  }
-
-  if (flowView === 'notify_sms_preview' && notifyMeta) {
-    return (
-      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>문자 발송 미리보기</DialogTitle>
+            <DialogTitle>1차 담당자 문자 발송 (2/3)</DialogTitle>
             <DialogDescription>
-              수신: <span className="font-medium text-gray-900">{smsPhone}</span> — 내용을 수정한 뒤 발송하세요.
+              수신 번호를 입력하고 내용을 수정한 뒤 발송하세요. 다음 단계에서 보고자(접수자) 안내 문자(3/3)가 이어집니다.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="notify-sms-draft">발송 내용</Label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 text-xs"
-                disabled={previewLoading}
-                onClick={() => void fetchNotifyPreview('sms')}
-              >
-                {previewLoading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                템플릿 다시 불러오기
-              </Button>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="assign-sms-phone">수신 휴대폰</Label>
+              <Input
+                id="assign-sms-phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="01012345678"
+                value={smsPhone}
+                onChange={(e) => setSmsPhone(e.target.value)}
+              />
+              <p className="text-xs text-gray-500 leading-relaxed">
+                담당자 계정에 등록된 번호가 있으면 자동으로 채워집니다. 입력된 번호는 저장되지 않습니다.
+              </p>
             </div>
-            <Textarea
-              id="notify-sms-draft"
-              rows={8}
-              value={notifyDraft}
-              onChange={(e) => setNotifyDraft(e.target.value)}
-              className="text-sm leading-relaxed font-mono"
-              placeholder="발송할 문자 내용"
-            />
-            <p className="text-xs text-gray-500">
-              {notifyDraft.length}자 (90자 초과 시 LMS로 발송될 수 있습니다)
-            </p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="notify-sms-draft">발송 내용</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={previewLoading}
+                  onClick={() => void fetchNotifyPreview('sms')}
+                >
+                  {previewLoading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                  템플릿 다시 불러오기
+                </Button>
+              </div>
+              <Textarea
+                id="notify-sms-draft"
+                rows={8}
+                value={notifyDraft}
+                onChange={(e) => setNotifyDraft(e.target.value)}
+                className="text-sm leading-relaxed font-mono"
+                placeholder={previewLoading ? '문자 내용 불러오는 중…' : '발송할 문자 내용'}
+              />
+              <p className="text-xs text-gray-500">
+                {notifyDraft.length}자 (90자 초과 시 LMS로 발송될 수 있습니다)
+              </p>
+            </div>
           </div>
           <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={notifyLoading}
-              onClick={() => setFlowView('notify_sms')}
-            >
-              취소
+            <Button type="button" variant="outline" disabled={notifyLoading} onClick={() => void goToComplainantOrClose()}>
+              건너뛰기 → 보고자
             </Button>
             <Button
               type="button"
-              disabled={notifyLoading || !notifyDraft.trim()}
+              disabled={
+                notifyLoading
+                || previewLoading
+                || smsPhone.replace(/\D/g, '').length < 10
+                || !notifyDraft.trim()
+              }
               onClick={async () => {
                 const ok = await postNotify('sms', smsPhone)
                 if (ok) {
-                  toast({ title: '문자 발송', description: '입력하신 번호로 알림 문자를 보냈습니다.' })
-                  goToComplainantOrClose()
+                  toast({ title: '문자 발송', description: '담당자에게 알림 문자를 보냈습니다.' })
+                  await goToComplainantOrClose()
                 }
               }}
             >
@@ -657,30 +700,60 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
     )
   }
 
-  if (flowView === 'notify_complainant_sms' && complainantNotifyMeta) {
+  if (flowView === 'notify_complainant_sms') {
     return (
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>보고자 문자(알림톡) 발송</DialogTitle>
+            <DialogTitle>보고자 문자 발송 (3/3)</DialogTitle>
             <DialogDescription>
-              접수자(보고자)에게 배정 안내 문자를 보낼 수 있습니다.
+              수신 번호를 입력하고 내용을 수정한 뒤 발송하세요.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="assign-complainant-sms-phone">수신 휴대폰</Label>
-            <Input
-              id="assign-complainant-sms-phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="01012345678"
-              value={complainantSmsPhone}
-              onChange={(e) => setComplainantSmsPhone(e.target.value)}
-            />
-            <p className="text-xs text-gray-500 leading-relaxed">
-              접수 시 등록된 연락처가 있으면 자동으로 채워집니다. 입력된 번호는 저장되지 않습니다.
-            </p>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="assign-complainant-sms-phone">수신 휴대폰</Label>
+              <Input
+                id="assign-complainant-sms-phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="01012345678"
+                value={complainantSmsPhone}
+                onChange={(e) => setComplainantSmsPhone(e.target.value)}
+              />
+              <p className="text-xs text-gray-500 leading-relaxed">
+                접수 시 등록된 연락처가 있으면 자동으로 채워집니다. 입력된 번호는 저장되지 않습니다.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="notify-complainant-sms-draft">발송 내용</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={previewLoading}
+                  onClick={() => void fetchComplainantPreview()}
+                >
+                  {previewLoading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                  템플릿 다시 불러오기
+                </Button>
+              </div>
+              <Textarea
+                id="notify-complainant-sms-draft"
+                rows={8}
+                value={complainantNotifyDraft}
+                onChange={(e) => setComplainantNotifyDraft(e.target.value)}
+                className="text-sm leading-relaxed font-mono"
+                placeholder={previewLoading ? '문자 내용 불러오는 중…' : '발송할 문자 내용'}
+              />
+              <p className="text-xs text-gray-500">
+                {complainantNotifyDraft.length}자 (90자 초과 시 LMS로 발송될 수 있습니다)
+              </p>
+              <p className="text-xs text-gray-500">「문자 내용·인자 설정」 메뉴에서 템플릿을 바꿀 수 있습니다.</p>
+            </div>
           </div>
           <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" disabled={notifyLoading} onClick={() => resetAndClose()}>
@@ -688,72 +761,12 @@ export function AssignModal({ open, onClose, complaintId, level, d2OrganizationI
             </Button>
             <Button
               type="button"
-              disabled={notifyLoading || previewLoading || complainantSmsPhone.replace(/\D/g, '').length < 10}
-              onClick={async () => {
-                const d = complainantSmsPhone.replace(/\D/g, '')
-                if (d.length < 10) return
-                await fetchComplainantPreview()
-                setFlowView('notify_complainant_sms_preview')
-              }}
-            >
-              {previewLoading && <Loader2 className="mr-2 w-4 h-4 animate-spin" />}
-              미리보기
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    )
-  }
-
-  if (flowView === 'notify_complainant_sms_preview' && complainantNotifyMeta) {
-    return (
-      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>보고자 문자 발송 미리보기</DialogTitle>
-            <DialogDescription>
-              수신: <span className="font-medium text-gray-900">{complainantSmsPhone}</span> — 내용을 수정한 뒤 발송하세요.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="notify-complainant-sms-draft">발송 내용</Label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 text-xs"
-                disabled={previewLoading}
-                onClick={() => void fetchComplainantPreview()}
-              >
-                {previewLoading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                템플릿 다시 불러오기
-              </Button>
-            </div>
-            <Textarea
-              id="notify-complainant-sms-draft"
-              rows={6}
-              value={complainantNotifyDraft}
-              onChange={(e) => setComplainantNotifyDraft(e.target.value)}
-              className="text-sm leading-relaxed font-mono"
-              placeholder="발송할 문자 내용"
-            />
-            <p className="text-xs text-gray-500">
-              {complainantNotifyDraft.length}자 (90자 초과 시 LMS로 발송될 수 있습니다)
-            </p>
-          </div>
-          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={notifyLoading}
-              onClick={() => setFlowView('notify_complainant_sms')}
-            >
-              취소
-            </Button>
-            <Button
-              type="button"
-              disabled={notifyLoading || !complainantNotifyDraft.trim()}
+              disabled={
+                notifyLoading
+                || previewLoading
+                || complainantSmsPhone.replace(/\D/g, '').length < 10
+                || !complainantNotifyDraft.trim()
+              }
               onClick={async () => {
                 const ok = await postComplainantNotify(complainantSmsPhone)
                 if (ok) {
